@@ -1,341 +1,322 @@
 'use strict';
 
-/* ─── DOM refs ─────────────────────────────────────────── */
-const uploadScreen    = document.getElementById('upload-screen');
-const dashScreen      = document.getElementById('dashboard-screen');
-const dropZone        = document.getElementById('drop-zone');
-const fileInput       = document.getElementById('file-input');
-const errorBanner     = document.getElementById('error-banner');
-const errorText       = document.getElementById('error-text');
-const btnReset        = document.getElementById('btn-reset');
-const fileNameLabel   = document.getElementById('file-name-label');
+/* ─── STATE ─── */
+const MONTHS_2026 = ['Janvier','Février','Mars','Avril','Mai','Juin','Juillet','Août','Septembre','Octobre','Novembre','Décembre'];
+const MONTHS_2025 = ['Avril','Mai','Juin','Juillet','Août','Septembre','Octobre','Novembre','Décembre'];
+const SHORT = ['J','F','M','A','M','J','J','A','S','O','N','D'];
+const SHORT25 = ['A','M','J','J','A','S','O','N','D'];
 
-/* ─── Navigation ────────────────────────────────────────── */
-function showScreen(name) {
-  uploadScreen.classList.toggle('active', name === 'upload');
-  dashScreen.classList.toggle('active', name === 'dashboard');
+let state = {
+  params: { forfait: 218, cpAcquis: 24.8, cpPlafond: 25, rttPlafond: 9 },
+  data2026: MONTHS_2026.map(m => ({ mois: m, prod: null, int: null, cp: null, rtt: null })),
+  data2025: MONTHS_2025.map(m => ({ mois: m, cp: null, rtt: null })),
+};
+
+/* ─── HELPERS ─── */
+const $  = id => document.getElementById(id);
+const r2 = n  => Math.round((n || 0) * 100) / 100;
+const fmt = n => n == null ? '—' : (n % 1 === 0 ? n.toString() : n.toFixed(1));
+const sum = (arr, key) => r2(arr.reduce((a, row) => a + (row[key] || 0), 0));
+
+/* ─── PAGES ─── */
+function show(pageId) {
+  document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+  $(pageId).classList.add('active');
 }
 
-/* ─── Drag & drop ───────────────────────────────────────── */
-dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('drag-over'); });
-dropZone.addEventListener('dragleave', () => dropZone.classList.remove('drag-over'));
-dropZone.addEventListener('drop', e => {
-  e.preventDefault();
-  dropZone.classList.remove('drag-over');
-  const file = e.dataTransfer.files[0];
-  if (file) processFile(file);
-});
+/* ─── UPLOAD ─── */
+const dropzone = $('dropzone');
+const fileIn   = $('file-in');
 
-fileInput.addEventListener('change', () => {
-  if (fileInput.files[0]) processFile(fileInput.files[0]);
-});
+dropzone.addEventListener('dragover', e => { e.preventDefault(); dropzone.classList.add('over'); });
+dropzone.addEventListener('dragleave', () => dropzone.classList.remove('over'));
+dropzone.addEventListener('drop', e => { e.preventDefault(); dropzone.classList.remove('over'); handleFile(e.dataTransfer.files[0]); });
+fileIn.addEventListener('change', () => handleFile(fileIn.files[0]));
+dropzone.addEventListener('click', e => { if (e.target.tagName !== 'LABEL') fileIn.click(); });
 
-btnReset.addEventListener('click', () => {
-  fileInput.value = '';
-  errorBanner.classList.add('hidden');
-  showScreen('upload');
-});
+$('btn-back').addEventListener('click', () => show('page-upload'));
 
-/* ─── Show/hide error ───────────────────────────────────── */
-function showError(msg) {
-  errorText.textContent = msg;
-  errorBanner.classList.remove('hidden');
-}
-
-/* ─── Excel parsing ─────────────────────────────────────── */
-function processFile(file) {
-  errorBanner.classList.add('hidden');
-
+function handleFile(file) {
+  if (!file) return;
   const reader = new FileReader();
   reader.onload = e => {
     try {
       const wb = XLSX.read(e.target.result, { type: 'array', cellDates: true });
-      const data = extractData(wb);
-      renderDashboard(data, file.name);
-      showScreen('dashboard');
-    } catch (err) {
-      showError('Impossible de lire le fichier : ' + err.message);
+      parseWorkbook(wb);
+      $('header-file').textContent = file.name;
+      launch();
+    } catch(err) {
+      const el = $('upload-err');
+      el.textContent = 'Impossible de lire le fichier : ' + err.message;
+      el.classList.remove('hidden');
     }
   };
   reader.readAsArrayBuffer(file);
 }
 
-/* ─── Data extraction ───────────────────────────────────── */
-function extractData(wb) {
-  const sheetNames = wb.SheetNames;
+/* ─── PARSE EXCEL ─── */
+function parseWorkbook(wb) {
+  const names = wb.SheetNames;
+  const findSheet = kw => wb.Sheets[names.find(n => n.toLowerCase().includes(kw.toLowerCase()))] || null;
 
-  // ── Find sheets by partial name match (case-insensitive) ──
-  const find = keyword =>
-    wb.Sheets[sheetNames.find(n => n.toLowerCase().includes(keyword.toLowerCase()))] || null;
+  const wsMain  = findSheet('suivi forfait') || findSheet('suivi');
+  const ws2026  = findSheet('conges-2026') || findSheet('conges 2026');
+  const ws2025  = findSheet('conges-2025') || findSheet('conges 2025');
+  const wsData  = findSheet('data');
 
-  const wsMain   = find('suivi forfait') || find('suivi');
-  const ws2026   = find('2026') && !find('conges-2026') ? find('2026') : find('conges-2026') || find('2026');
-  const ws2025   = find('conges-2025') || find('2025');
-  const wsData   = find('data');
+  const val = (ws, ref) => ws && ws[ref] ? ws[ref].v : null;
+  const num = (ws, ref) => { const v = val(ws, ref); return v !== null && !isNaN(+v) ? +v : null; };
 
-  if (!wsMain) throw new Error('Onglet "Suivi forfait" introuvable. Vérifie le nom des onglets.');
+  // Params from main sheet
+  if (wsMain) {
+    state.params.forfait    = num(wsMain, 'H3') || 218;
+    state.params.cpPlafond  = num(wsMain, 'H6') || 25;
+    state.params.rttPlafond = num(wsMain, 'H7') || 9;
+    state.params.cpAcquis   = num(wsMain, 'K11') || 24.8;
 
-  const cell = (ws, ref) => ws && ws[ref] ? ws[ref].v : null;
-  const num  = (ws, ref) => { const v = cell(ws, ref); return (v !== null && !isNaN(+v)) ? +v : null; };
-
-  // ── Main sheet data ──
-  const cpPlafond  = num(wsMain, 'H6') ?? 25;
-  const rttPlafond = num(wsMain, 'H7') ?? 9;
-  const cpAcquis   = num(wsMain, 'K11');
-  const dateRaw    = cell(wsMain, 'K10');
-
-  // ── 2026 congés ──
-  const ws26 = find('conges-2026') || find('conges 2026');
-  let cp2026  = null;
-  let rtt2026 = null;
-  let rttMonths2026 = [];
-
-  if (ws26) {
-    cp2026  = num(ws26, 'B14'); // SUM(B2:B13)
-    rtt2026 = num(ws26, 'C14');
-
-    const monthCodes = ['J','F','M','A','M','J','J','A','S','O','N','D'];
-    const monthNames = ['Janvier','Février','Mars','Avril','Mai','Juin',
-                        'Juillet','Août','Septembre','Octobre','Novembre','Décembre'];
+    // 2026 monthly data: rows 5-16 = J,F,M,A,M,J,J,A,S,O,N,D
     for (let i = 0; i < 12; i++) {
-      const rttVal = num(ws26, `C${i + 2}`);
-      if (rttVal) {
-        rttMonths2026.push({ name: monthNames[i], val: rttVal });
-      }
+      const r = i + 5;
+      state.data2026[i].prod = num(wsMain, `B${r}`);
+      state.data2026[i].int  = num(wsMain, `C${r}`);
+      state.data2026[i].cp   = num(wsMain, `D${r}`);
+      state.data2026[i].rtt  = num(wsMain, `E${r}`);
     }
-  } else {
-    // fallback: read from main sheet columns D/E
-    let cpSum = 0, rttSum = 0;
-    for (let r = 5; r <= 16; r++) {
-      cpSum  += num(wsMain, `D${r}`) ?? 0;
-      rttSum += num(wsMain, `E${r}`) ?? 0;
-    }
-    cp2026  = cpSum;
-    rtt2026 = rttSum;
   }
 
-  // ── 2025 congés ──
-  let cp2025  = null;
-  let rtt2025 = null;
-
+  // 2025 data from Conges-2025 or Data sheet
   if (ws2025) {
-    cp2025  = num(ws2025, 'B11');
-    rtt2025 = num(ws2025, 'C11');
+    for (let i = 0; i < 9; i++) {
+      const r = i + 2;
+      state.data2025[i].cp  = num(ws2025, `B${r}`);
+      state.data2025[i].rtt = num(ws2025, `C${r}`);
+    }
   } else if (wsData) {
-    // Try reading TOTAL row from Data sheet
-    for (let r = 5; r <= 30; r++) {
-      const a = cell(wsData, `A${r}`);
-      if (a && String(a).toLowerCase() === 'total') {
-        cp2025  = num(wsData, `B${r}`);
-        rtt2025 = num(wsData, `C${r}`);
-        break;
+    const months25 = ['AVRIL','MAI','JUIN','JUILLET','AOUT','SEPTEMBRE','OCTOBRE','NOVEMBRE','DECEMBRE'];
+    for (let r = 1; r <= 30; r++) {
+      const label = val(wsData, `A${r}`);
+      if (!label) continue;
+      const idx = months25.findIndex(m => String(label).toUpperCase().includes(m));
+      if (idx >= 0) {
+        state.data2025[idx].cp  = num(wsData, `B${r}`);
+        state.data2025[idx].rtt = num(wsData, `C${r}`);
       }
     }
   }
 
-  // ── Dates / year labels ──
-  let arrivalDate = null;
-  if (dateRaw instanceof Date) arrivalDate = dateRaw;
-  else if (typeof dateRaw === 'number') {
-    arrivalDate = XLSX.SSF.parse_date_code(dateRaw);
-    if (arrivalDate) arrivalDate = new Date(arrivalDate.y, arrivalDate.m - 1, arrivalDate.d);
-  }
-
-  const arrivalStr = arrivalDate
-    ? arrivalDate.toLocaleDateString('fr-FR', { day: 'numeric', month: 'long', year: 'numeric' })
-    : null;
-
-  const taux = num(wsMain, 'B2') ?? 1;
-
-  return {
-    cp: {
-      past:     cp2025 ?? 0,
-      current:  cp2026 ?? 0,
-      plafond:  cpPlafond,
-      acquis:   cpAcquis,
-    },
-    rtt: {
-      current:  rtt2026 ?? 0,
-      past:     rtt2025,
-      plafond:  rttPlafond,
-      months:   rttMonths2026,
-    },
-    arrivalStr,
-    taux,
-  };
+  syncParamInputs();
 }
 
-/* ─── Render dashboard ──────────────────────────────────── */
-function renderDashboard(d, fileName) {
-  fileNameLabel.textContent = fileName;
-
-  // ── Pills ──
-  document.getElementById('pill-arrival-text').textContent =
-    d.arrivalStr ? `Arrivée le ${d.arrivalStr}` : 'Date d\'arrivée inconnue';
-
-  const tauxPct = Math.round(d.taux * 100);
-  document.getElementById('pill-taux-text').textContent =
-    tauxPct === 100 ? 'Temps plein' : `Temps partiel ${tauxPct}%`;
-
-  document.getElementById('pill-acquis-text').textContent =
-    d.cp.acquis !== null ? `CP acquis : ${fmt(d.cp.acquis)} j` : 'CP acquis : —';
-
-  // ── CP card ──
-  const cpTotal  = round2(d.cp.past + d.cp.current);
-  const cpRef    = d.cp.acquis ?? d.cp.plafond;
-  const cpReste  = round2(cpRef - cpTotal);
-  const cpPct    = Math.min((cpTotal / cpRef) * 100, 100);
-  const cpOver   = cpTotal > cpRef;
-  const cpBarPct = cpOver ? 100 : cpPct;
-  const overPct  = cpOver ? round2(((cpTotal - cpRef) / cpRef) * 15) : 0; // visual overflow capped at 15%
-
-  setText('cp-big-num', cpOver ? `+${fmt(Math.abs(cpReste))} j` : `${fmt(cpReste)} j`);
-  setText('cp-status-label', cpOver ? 'Dépassement de' : 'Reste à poser');
-  setNumStyle('cp-big-num', cpOver ? 'red' : cpReste <= 3 ? 'orange' : 'green');
-
-  setBadge('cp-badge',
-    cpOver       ? 'Trop pris'             : null,
-    cpReste <= 0 ? 'danger'
-    : cpReste <= 3 ? 'warn'
-    : 'ok',
-    cpOver       ? null : cpReste <= 3 ? 'Attention'  : 'OK'
-  );
-
-  setBar('cp-bar', cpBarPct, cpOver ? 'var(--red)' : 'var(--text-primary)');
-
-  const cpOvEl = document.getElementById('cp-overflow-bar');
-  if (cpOver) {
-    cpOvEl.style.display = 'block';
-    cpOvEl.style.width   = Math.min(overPct, 25) + '%';
-  } else {
-    cpOvEl.style.display = 'none';
-  }
-
-  setTicks('cp-ticks', `0`, `${fmt(cpRef)} acquis`, `${fmt(d.cp.plafond)} plafond`);
-
-  setText('cp-past',          `${fmt(d.cp.past)} j`);
-  setText('cp-current',       `${fmt(d.cp.current)} j`);
-  setText('cp-total-taken',   `${fmt(cpTotal)} j`);
-  setText('cp-acquis-detail', d.cp.acquis !== null ? `${fmt(d.cp.acquis)} j` : '—');
-  setText('cp-plafond-detail',`${fmt(d.cp.plafond)} j`);
-
-  const totalEl = document.getElementById('cp-total-taken');
-  totalEl.style.color = cpOver ? 'var(--red)' : 'inherit';
-
-  // ── RTT card ──
-  const rttTotal = d.rtt.current;
-  const rttReste = round2(d.rtt.plafond - rttTotal);
-  const rttOver  = rttTotal > d.rtt.plafond;
-  const rttPct   = Math.min((rttTotal / d.rtt.plafond) * 100, 100);
-
-  setText('rtt-big-num', rttOver ? `+${fmt(Math.abs(rttReste))} j` : `${fmt(rttReste)} j`);
-  setText('rtt-status-label', rttOver ? 'Dépassement de' : 'Reste à poser');
-  setNumStyle('rtt-big-num', rttOver ? 'red' : rttReste <= 2 ? 'orange' : 'green');
-
-  setBadge('rtt-badge',
-    rttOver       ? 'Trop pris' : null,
-    rttOver       ? 'danger' : rttReste <= 2 ? 'warn' : 'ok',
-    rttOver       ? null : rttReste <= 2 ? 'Attention' : 'OK'
-  );
-
-  setBar('rtt-bar', rttPct, rttOver ? 'var(--red)' : 'var(--text-primary)');
-  setTicks('rtt-ticks', '0', `${fmt(rttTotal)} pris`, `${fmt(d.rtt.plafond)} plafond`);
-
-  const rttDetail = document.getElementById('rtt-months-detail');
-  rttDetail.innerHTML = '';
-  if (d.rtt.months && d.rtt.months.length > 0) {
-    d.rtt.months.forEach(m => {
-      const row = document.createElement('div');
-      row.className = 'rtt-month-row';
-      row.innerHTML = `<span class="rtt-month-name">${m.name}</span><span class="rtt-month-val">${fmt(m.val)} j</span>`;
-      rttDetail.appendChild(row);
-    });
-  } else {
-    rttDetail.innerHTML = '<span style="font-size:13px;color:var(--text-muted)">Aucun RTT posé en 2026</span>';
-  }
-
-  setText('rtt-total-taken',  `${fmt(rttTotal)} j`);
-  setText('rtt-plafond-detail', `${fmt(d.rtt.plafond)} j`);
-
-  // ── Alert zone ──
-  const alerts = document.getElementById('alert-zone');
-  alerts.innerHTML = '';
-
-  if (cpOver) {
-    const diff = fmt(Math.abs(cpReste));
-    addAlert(alerts, 'danger',
-      `Tu as pris <strong>${diff} jours de CP en trop</strong> par rapport aux ${fmt(cpRef)} j acquis.
-       Rapproche-toi de ton service RH pour régulariser.`);
-  } else if (cpReste <= 3 && cpReste >= 0) {
-    addAlert(alerts, 'warn',
-      `Plus que <strong>${fmt(cpReste)} j de CP à poser</strong> avant la fin du cycle (mai).
-       Pense à planifier tes derniers congés.`);
-  } else {
-    addAlert(alerts, 'ok',
-      `Il te reste <strong>${fmt(cpReste)} j de CP à poser</strong> d'ici la fin du cycle mai ${new Date().getFullYear()}.`);
-  }
-
-  if (rttOver) {
-    addAlert(alerts, 'danger',
-      `Tu as pris <strong>${fmt(Math.abs(rttReste))} RTT en trop</strong>. Contacte ton service RH.`);
-  } else if (rttReste <= 2 && rttReste >= 0) {
-    addAlert(alerts, 'warn',
-      `Plus que <strong>${fmt(rttReste)} RTT à poser</strong> avant fin décembre. Les RTT non pris sont perdus !`);
-  } else {
-    addAlert(alerts, 'ok',
-      `Il te reste <strong>${fmt(rttReste)} RTT à poser</strong> avant fin décembre. Les RTT non pris sont perdus.`);
-  }
-
-  // ── Previous year RTT note ──
-  const prevNote = document.getElementById('rtt-prev-note');
-  if (d.rtt.past !== null && d.rtt.past > 0) {
-    prevNote.style.display = 'flex';
-    document.getElementById('rtt-prev-note-text').textContent =
-      `RTT 2025 (cycle précédent) : ${fmt(d.rtt.past)} j posés — ce cycle est maintenant terminé.`;
-  } else {
-    prevNote.style.display = 'none';
-  }
+/* ─── INIT ─── */
+function launch() {
+  buildTable2026();
+  buildTable2025();
+  syncParamInputs();
+  recalc();
+  show('page-app');
 }
 
-/* ─── Helpers ───────────────────────────────────────────── */
-function round2(n)      { return Math.round(n * 100) / 100; }
-function fmt(n)         { return n === null ? '—' : (Number.isInteger(n * 10) ? n.toFixed(1 * (n % 1 !== 0)) : n.toFixed(1)); }
-function setText(id, t) { const el = document.getElementById(id); if (el) el.textContent = t; }
+/* ─── BUILD TABLES ─── */
+function buildTable2026() {
+  const tbody = $('table-body');
+  tbody.innerHTML = '';
+  state.data2026.forEach((row, i) => {
+    const tr = document.createElement('tr');
+    tr.dataset.idx = i;
+    tr.innerHTML = `
+      <td class="col-mois">${SHORT[i]}</td>
+      <td class="editable" data-key="prod">${fmt(row.prod)}</td>
+      <td class="editable" data-key="int">${fmt(row.int)}</td>
+      <td class="editable" data-key="cp">${fmt(row.cp)}</td>
+      <td class="editable" data-key="rtt">${fmt(row.rtt)}</td>
+      <td class="col-total">${fmt(rowTotal26(row))}</td>
+    `;
+    tbody.appendChild(tr);
+  });
+  tbody.addEventListener('click', onCellClick26);
+}
 
-function setNumStyle(id, state) {
-  const el = document.getElementById(id);
-  if (!el) return;
-  el.style.color = state === 'red' ? 'var(--red)' : state === 'orange' ? 'var(--orange)' : 'var(--green)';
+function buildTable2025() {
+  const tbody = $('table-body-2025');
+  tbody.innerHTML = '';
+  state.data2025.forEach((row, i) => {
+    const tr = document.createElement('tr');
+    tr.dataset.idx = i;
+    tr.innerHTML = `
+      <td class="col-mois">${SHORT25[i]}</td>
+      <td class="editable" data-key="cp">${fmt(row.cp)}</td>
+      <td class="editable" data-key="rtt">${fmt(row.rtt)}</td>
+    `;
+    tbody.appendChild(tr);
+  });
+  tbody.addEventListener('click', onCellClick25);
+}
+
+function rowTotal26(row) {
+  const t = (row.prod||0) + (row.int||0) + (row.cp||0) + (row.rtt||0);
+  return t || null;
+}
+
+/* ─── INLINE EDITING ─── */
+function onCellClick26(e) {
+  const td = e.target.closest('td.editable');
+  if (!td || td.querySelector('input')) return;
+  const tr  = td.closest('tr');
+  const idx = +tr.dataset.idx;
+  const key = td.dataset.key;
+  startEdit(td, state.data2026[idx][key], val => {
+    state.data2026[idx][key] = val;
+    td.textContent = fmt(val);
+    tr.cells[5].textContent = fmt(rowTotal26(state.data2026[idx]));
+    updateFooter26();
+    recalc();
+  });
+}
+
+function onCellClick25(e) {
+  const td = e.target.closest('td.editable');
+  if (!td || td.querySelector('input')) return;
+  const tr  = td.closest('tr');
+  const idx = +tr.dataset.idx;
+  const key = td.dataset.key;
+  startEdit(td, state.data2025[idx][key], val => {
+    state.data2025[idx][key] = val;
+    td.textContent = fmt(val);
+    updateFooter25();
+    recalc();
+  });
+}
+
+function startEdit(td, current, onDone) {
+  const input = document.createElement('input');
+  input.type  = 'number';
+  input.value = current != null ? current : '';
+  input.min   = 0; input.step = 0.5;
+  td.textContent = '';
+  td.appendChild(input);
+  input.focus();
+  input.select();
+
+  function commit() {
+    const v = input.value.trim() === '' ? null : parseFloat(input.value);
+    td.removeChild(input);
+    onDone(v);
+  }
+  input.addEventListener('blur', commit);
+  input.addEventListener('keydown', e => {
+    if (e.key === 'Enter') { e.preventDefault(); commit(); }
+    if (e.key === 'Escape') { td.textContent = fmt(current); td.removeChild(input); }
+  });
+}
+
+/* ─── FOOTERS ─── */
+function updateFooter26() {
+  const prod = sum(state.data2026, 'prod');
+  const int_ = sum(state.data2026, 'int');
+  const cp   = sum(state.data2026, 'cp');
+  const rtt  = sum(state.data2026, 'rtt');
+  $('tot-prod').textContent = fmt(prod);
+  $('tot-int').textContent  = fmt(int_);
+  $('tot-cp').textContent   = fmt(cp);
+  $('tot-rtt').textContent  = fmt(rtt);
+  $('tot-all').textContent  = fmt(r2(prod + int_ + cp + rtt));
+}
+
+function updateFooter25() {
+  $('tot25-cp').textContent  = fmt(sum(state.data2025, 'cp'));
+  $('tot25-rtt').textContent = fmt(sum(state.data2025, 'rtt'));
+}
+
+/* ─── RECALC & RENDER ─── */
+function recalc() {
+  updateFooter26();
+  updateFooter25();
+
+  const p = state.params;
+
+  // Forfait
+  const travaille = r2(sum(state.data2026, 'prod') + sum(state.data2026, 'int'));
+  const resteF    = r2(p.forfait - travaille);
+
+  // CP cycle mai→mai
+  const cp2025  = sum(state.data2025, 'cp');
+  const cp2026  = sum(state.data2026, 'cp');
+  const cpTotal = r2(cp2025 + cp2026);
+  const cpReste = r2(p.cpAcquis - cpTotal);
+
+  // RTT cycle jan→déc 2026
+  const rttTotal = sum(state.data2026, 'rtt');
+  const rttReste = r2(p.rttPlafond - rttTotal);
+
+  /* ── Forfait counter ── */
+  const forfaitPct = Math.min((travaille / p.forfait) * 100, 100);
+  $('val-forfait').textContent = fmt(resteF);
+  $('hint-forfait').textContent = `${fmt(travaille)} jh travaillés sur ${p.forfait}`;
+  setBar('bar-forfait', forfaitPct);
+  setBadge('bdg-forfait',
+    resteF <= 0   ? ['Objectif atteint', 'ok'] :
+    resteF <= 20  ? ['Bientôt !', 'warn'] :
+                    [fmt(Math.round(forfaitPct)) + '%', 'ok']
+  );
+  $('cnt-forfait').style.color = 'inherit';
+
+  /* ── CP counter ── */
+  const cpPct = Math.min((cpTotal / p.cpAcquis) * 100, 100);
+  $('val-cp').textContent = fmt(Math.abs(cpReste));
+  $('val-cp').style.color = cpReste < 0 ? 'var(--red)' : 'inherit';
+  $('hint-cp').textContent = `${fmt(cpTotal)} j pris sur ${p.cpAcquis} acquis`;
+  setBar('bar-cp', cpPct, cpReste < 0 ? 'var(--red)' : null);
+  setBadge('bdg-cp',
+    cpReste < 0   ? ['Dépassé de ' + fmt(Math.abs(cpReste)) + 'j', 'danger'] :
+    cpReste <= 3  ? ['Plus que ' + fmt(cpReste) + 'j', 'warn'] :
+                    [fmt(cpReste) + 'j restants', 'ok']
+  );
+
+  /* ── RTT counter ── */
+  const rttPct = Math.min((rttTotal / p.rttPlafond) * 100, 100);
+  $('val-rtt').textContent = fmt(Math.abs(rttReste));
+  $('val-rtt').style.color = rttReste < 0 ? 'var(--red)' : 'inherit';
+  $('hint-rtt').textContent = `${fmt(rttTotal)} j pris sur ${p.rttPlafond} de plafond`;
+  setBar('bar-rtt', rttPct, rttReste < 0 ? 'var(--red)' : null);
+  setBadge('bdg-rtt',
+    rttReste < 0  ? ['Dépassé de ' + fmt(Math.abs(rttReste)) + 'j', 'danger'] :
+    rttReste <= 2 ? ['Plus que ' + fmt(rttReste) + 'j', 'warn'] :
+                    [fmt(rttReste) + 'j restants', 'ok']
+  );
 }
 
 function setBar(id, pct, color) {
-  const el = document.getElementById(id);
-  if (!el) return;
-  el.style.width    = Math.min(Math.max(pct, 0), 100) + '%';
-  el.style.background = color;
+  const el = $(id);
+  el.style.width = Math.max(0, pct) + '%';
+  if (color) el.style.background = color;
+  else el.style.background = '';
 }
 
-function setTicks(id, left, mid, right) {
-  const el = document.getElementById(id);
-  if (!el) return;
-  el.innerHTML = `<span>${left}</span><span style="color:var(--text-primary);font-weight:500">${mid}</span><span>${right}</span>`;
+function setBadge(id, [label, type]) {
+  const el = $(id);
+  el.textContent = label;
+  el.className = 'cnt-badge badge-' + type;
 }
 
-function setBadge(id, dangerLabel, state, okLabel) {
-  const el = document.getElementById(id);
-  if (!el) return;
-  el.className = 'card-badge badge-' + state;
-  el.textContent = state === 'danger' ? (dangerLabel || 'Dépassé') : state === 'warn' ? (okLabel || 'Attention') : (okLabel || 'OK');
+/* ─── PARAMS ─── */
+function syncParamInputs() {
+  $('p-forfait').value    = state.params.forfait;
+  $('p-cp-acquis').value  = state.params.cpAcquis;
+  $('p-cp-plafond').value = state.params.cpPlafond;
+  $('p-rtt-plafond').value = state.params.rttPlafond;
 }
 
-function addAlert(container, type, html) {
-  const icons = {
-    danger: `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>`,
-    warn:   `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>`,
-    ok:     `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>`,
-  };
-  const div = document.createElement('div');
-  div.className = `alert alert-${type}`;
-  div.innerHTML = icons[type] + `<span>${html}</span>`;
-  container.appendChild(div);
-}
+['p-forfait','p-cp-acquis','p-cp-plafond','p-rtt-plafond'].forEach(id => {
+  $(id).addEventListener('input', () => {
+    state.params.forfait    = +$('p-forfait').value    || 218;
+    state.params.cpAcquis   = +$('p-cp-acquis').value  || 24.8;
+    state.params.cpPlafond  = +$('p-cp-plafond').value || 25;
+    state.params.rttPlafond = +$('p-rtt-plafond').value || 9;
+    recalc();
+  });
+});
+
+/* ─── START WITHOUT FILE ─── */
+$('header-file').textContent = 'nouveau fichier';
+launch();
+show('page-upload'); // reset to upload on load
