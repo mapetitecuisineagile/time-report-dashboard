@@ -1,4 +1,5 @@
 'use strict';
+document.addEventListener('DOMContentLoaded', () => {
 
 /* ─── STATE ─── */
 const MONTHS_2026 = ['Janvier','Février','Mars','Avril','Mai','Juin','Juillet','Août','Septembre','Octobre','Novembre','Décembre'];
@@ -320,3 +321,5 @@ function syncParamInputs() {
 $('header-file').textContent = 'nouveau fichier';
 launch();
 show('page-upload'); // reset to upload on load
+
+}); // fin DOMContentLoaded
