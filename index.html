@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Suivi Congés & RTT</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;1,9..40,300&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+  <!-- Upload screen -->
+  <div id="upload-screen" class="screen active">
+    <header class="app-header">
+      <span class="app-logo">◆</span>
+      <span class="app-name">suivi congés</span>
+    </header>
+
+    <main class="upload-main">
+      <div class="upload-hero">
+        <h1>Visualise tes congés<br /><em>d'un coup d'œil</em></h1>
+        <p class="upload-subtitle">Importe ton fichier Excel de suivi de forfait pour voir<br />l'état de tes CP et RTT instantanément.</p>
+      </div>
+
+      <div class="drop-zone" id="drop-zone">
+        <div class="drop-icon">
+          <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+            <polyline points="14,2 14,8 20,8"/>
+            <line x1="12" y1="18" x2="12" y2="12"/>
+            <polyline points="9,15 12,12 15,15"/>
+          </svg>
+        </div>
+        <p class="drop-label">Glisse ton fichier ici</p>
+        <p class="drop-hint">ou</p>
+        <label class="btn-upload" for="file-input">Parcourir</label>
+        <input type="file" id="file-input" accept=".xlsx,.xls,.ods" hidden />
+        <p class="drop-formats">.xlsx · .xls · .ods</p>
+      </div>
+
+      <div id="error-banner" class="error-banner hidden">
+        <span id="error-text"></span>
+      </div>
+    </main>
+  </div>
+
+  <!-- Dashboard screen -->
+  <div id="dashboard-screen" class="screen">
+
+    <header class="dash-header">
+      <div class="dash-header-left">
+        <span class="app-logo">◆</span>
+        <span class="app-name">suivi congés</span>
+      </div>
+      <div class="dash-header-right">
+        <span id="file-name-label" class="file-label"></span>
+        <button class="btn-reset" id="btn-reset">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="1 4 1 10 7 10"/>
+            <path d="M3.51 15a9 9 0 1 0 .49-4.99"/>
+          </svg>
+          Changer de fichier
+        </button>
+      </div>
+    </header>
+
+    <main class="dash-main">
+
+      <!-- Summary pills -->
+      <div class="summary-row">
+        <div class="pill" id="pill-arrival">
+          <span class="pill-icon">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+          </span>
+          <span id="pill-arrival-text">Arrivée —</span>
+        </div>
+        <div class="pill" id="pill-taux">
+          <span class="pill-icon">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+          </span>
+          <span id="pill-taux-text">Temps plein</span>
+        </div>
+        <div class="pill" id="pill-acquis">
+          <span class="pill-icon">★</span>
+          <span id="pill-acquis-text">CP acquis —</span>
+        </div>
+      </div>
+
+      <!-- Cards grid -->
+      <div class="cards-grid">
+
+        <!-- CP card -->
+        <div class="dash-card" id="cp-card">
+          <div class="card-cycle">CP · mai à mai</div>
+          <div class="card-top">
+            <div>
+              <div class="card-big-label" id="cp-status-label">—</div>
+              <div class="card-big-num" id="cp-big-num">—</div>
+            </div>
+            <div class="card-badge" id="cp-badge"></div>
+          </div>
+
+          <div class="progress-area">
+            <div class="progress-track">
+              <div class="progress-fill" id="cp-bar"></div>
+              <div class="progress-overflow" id="cp-overflow-bar"></div>
+            </div>
+            <div class="progress-ticks" id="cp-ticks"></div>
+          </div>
+
+          <div class="card-detail">
+            <div class="detail-row">
+              <span class="detail-label">Posé (avr–déc <span id="cp-year-start">2025</span>)</span>
+              <span class="detail-val" id="cp-past"></span>
+            </div>
+            <div class="detail-row">
+              <span class="detail-label">Posé (jan–mai <span id="cp-year-end">2026</span>)</span>
+              <span class="detail-val" id="cp-current"></span>
+            </div>
+            <div class="detail-row total-row">
+              <span class="detail-label">Total posé</span>
+              <span class="detail-val" id="cp-total-taken"></span>
+            </div>
+            <div class="detail-row">
+              <span class="detail-label">CP acquis (fiche de paie)</span>
+              <span class="detail-val" id="cp-acquis-detail"></span>
+            </div>
+            <div class="detail-row">
+              <span class="detail-label">Plafond contractuel</span>
+              <span class="detail-val" id="cp-plafond-detail"></span>
+            </div>
+          </div>
+        </div>
+
+        <!-- RTT card -->
+        <div class="dash-card" id="rtt-card">
+          <div class="card-cycle">RTT · jan à déc <span id="rtt-year">2026</span></div>
+          <div class="card-top">
+            <div>
+              <div class="card-big-label" id="rtt-status-label">—</div>
+              <div class="card-big-num" id="rtt-big-num">—</div>
+            </div>
+            <div class="card-badge" id="rtt-badge"></div>
+          </div>
+
+          <div class="progress-area">
+            <div class="progress-track">
+              <div class="progress-fill" id="rtt-bar"></div>
+              <div class="progress-overflow" id="rtt-overflow-bar" style="display:none;"></div>
+            </div>
+            <div class="progress-ticks" id="rtt-ticks"></div>
+          </div>
+
+          <div class="card-detail">
+            <div id="rtt-months-detail"></div>
+            <div class="detail-row total-row" style="margin-top: 8px;">
+              <span class="detail-label">Total posé</span>
+              <span class="detail-val" id="rtt-total-taken"></span>
+            </div>
+            <div class="detail-row">
+              <span class="detail-label">Plafond</span>
+              <span class="detail-val" id="rtt-plafond-detail"></span>
+            </div>
+          </div>
+        </div>
+
+      </div>
+
+      <!-- Alert zone -->
+      <div id="alert-zone"></div>
+
+      <!-- Previous year RTT note -->
+      <div class="info-note" id="rtt-prev-note" style="display:none;">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+        <span id="rtt-prev-note-text"></span>
+      </div>
+
+    </main>
+  </div>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
